@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Simulateur de consommation électrique journalière</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); color-scheme: light; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body { font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif; background: #eef1f5; color: #14213d; font-variant-numeric: tabular-nums; }
+  .card { background: #fff; border: 1px solid #dde3ec; }
+  .muted { color: #5b6a82; }
+  .input { background: #f6f8fb; border: 1px solid #dde3ec; color: #14213d; }
+  .input:focus { outline: 2px solid #16a34a; outline-offset: 0; background: #fff; }
+  .cell { background: #dfe4ec; transition: background .12s; }
+  .cell:hover { background: #c5cdda; }
+  .cell.on { background: #16a34a; }
+  .cell.on:hover { background: #12853c; }
+  .sticky-col { background: #fff; }
+  thead th { background: #f6f8fb; }
+  .bar { background: #16a34a; }
+  .share { background: #e3e8f0; }
+  .solar { background: rgba(250, 204, 21, .20); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { color-scheme: dark; }
+    :root:not([data-theme="light"]) body { background: #0c1220; color: #e8edf6; }
+    :root:not([data-theme="light"]) .card { background: #141c2e; border-color: #25314a; }
+    :root:not([data-theme="light"]) .muted { color: #93a1bb; }
+    :root:not([data-theme="light"]) .input { background: #0f1626; border-color: #25314a; color: #e8edf6; }
+    :root:not([data-theme="light"]) .input:focus { background: #0c1220; }
+    :root:not([data-theme="light"]) .cell { background: #27324a; }
+    :root:not([data-theme="light"]) .cell:hover { background: #34425f; }
+    :root:not([data-theme="light"]) .cell.on { background: #22c55e; }
+    :root:not([data-theme="light"]) .sticky-col { background: #141c2e; }
+    :root:not([data-theme="light"]) thead th { background: #0f1626; }
+    :root:not([data-theme="light"]) .bar { background: #22c55e; }
+    :root:not([data-theme="light"]) .share { background: #25314a; }
+    :root:not([data-theme="light"]) .solar { background: rgba(250, 204, 21, .13); }
+  }
+  .scroll-x { overflow-x: auto; }
+</style>
+</head>
+<body class="min-h-screen">
+<main class="mx-auto max-w-[1500px] px-8 py-10">
+
+  <header class="mb-8 flex items-end justify-between gap-6">
+    <div>
+      <h1 class="text-3xl font-extrabold tracking-tight">Simulateur consommation électrique journalière</h1>
+      <p class="muted mt-2 text-sm">Ajoutez vos appareils, indiquez leur puissance, puis cliquez sur les heures où ils fonctionnent.</p>
+    </div>
+    <button id="add" type="button" class="rounded-xl bg-[#16a34a] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#12853c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16a34a]">+ Ajouter un appareil</button>
+  </header>
+
+  <section class="card rounded-2xl">
+    <div class="scroll-x">
+      <table class="w-full border-collapse text-sm" id="grid">
+        <thead>
+          <tr id="head">
+            <th class="sticky left-0 z-10 min-w-[220px] px-4 py-3 text-left font-semibold">Appareil</th>
+            <th class="min-w-[130px] px-3 py-3 text-left font-semibold">Puissance (W)</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="flex items-center justify-between border-t px-4 py-3 text-xs muted" style="border-color:inherit">
+      <span id="count"></span>
+      <span class="flex items-center gap-5"><span class="flex items-center gap-1.5"><span class="solar inline-block h-3 w-3 rounded-sm border" style="border-color:#e0c200"></span>Plage 9h–15h</span><span>Astuce : maintenez le clic et glissez pour activer plusieurs heures d’un coup.</span></span>
+    </div>
+  </section>
+
+  <div class="mt-6 flex justify-center">
+    <button id="calc" type="button" class="rounded-xl bg-[#14213d] px-10 py-3.5 text-base font-bold text-white shadow-sm hover:bg-[#1f3159] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#14213d]">Calculer</button>
+  </div>
+
+  <div id="modal" class="fixed inset-0 z-50 hidden items-start justify-center overflow-y-auto bg-black/60 p-6" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+   <div id="report" class="card my-4 w-full max-w-[1200px] rounded-3xl p-8 shadow-2xl">
+    <div class="mb-6 flex items-center justify-between gap-4">
+      <div><h2 id="modal-title" class="text-2xl font-extrabold tracking-tight">Rapport de consommation</h2><p id="stamp" class="muted mt-1 text-sm"></p></div>
+      <div class="flex items-center gap-3" data-html2canvas-ignore="true">
+        <span id="toast" class="hidden text-sm text-red-600"></span>
+        <button id="pdf" type="button" class="rounded-xl bg-[#16a34a] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#12853c] disabled:opacity-60">Exporter en PDF</button>
+        <button id="close" type="button" class="input rounded-xl px-5 py-2.5 text-sm font-bold">Fermer</button>
+      </div>
+    </div>
+  <section id="result">
+    <div class="grid grid-cols-3 gap-6">
+      <div class="card col-span-1 rounded-2xl p-6">
+        <h2 class="text-sm font-semibold muted">Consommation journalière</h2>
+        <p class="mt-3 text-5xl font-extrabold tracking-tight"><span id="kwh">0</span> <span class="text-2xl font-bold muted">kWh</span></p>
+        <p class="muted mt-2 text-lg"><span id="wh" class="font-semibold">0</span> Wh</p>
+        <div class="solar mt-5 rounded-xl p-4">
+          <h3 class="text-sm font-semibold">Consommation en autonomie</h3>
+          <p class="mt-1 text-2xl font-extrabold"><span id="auto-kwh">0</span> <span class="text-base font-bold muted">kWh</span></p>
+          <p class="muted mt-0.5 text-sm"><span id="auto-wh" class="font-semibold">0</span> Wh, hors plage 9h–15h</p>
+        </div>
+        <dl class="mt-6 space-y-2 text-sm">
+          <div class="flex justify-between"><dt class="muted">Appareils pris en compte</dt><dd id="nb" class="font-semibold">0</dd></div>
+          <div class="flex justify-between"><dt class="muted">Heure de pointe</dt><dd id="peak" class="font-semibold">–</dd></div>
+          <div class="flex justify-between"><dt class="muted">Puissance max. simultanée</dt><dd id="peakw" class="font-semibold">0 W</dd></div>
+        </dl>
+      </div>
+
+      <div class="card col-span-2 rounded-2xl p-6">
+        <h2 class="text-sm font-semibold muted">Détail par appareil</h2>
+        <table class="mt-3 w-full text-sm">
+          <thead><tr class="text-left muted"><th class="py-2 pr-3 font-medium">Appareil</th><th class="py-2 pr-3 text-right font-medium">Puissance</th><th class="py-2 pr-3 text-right font-medium">Heures</th><th class="py-2 pr-3 text-right font-medium">Wh</th><th class="py-2 pr-3 text-right font-medium">kWh</th><th class="w-40 py-2 font-medium">Part</th></tr></thead>
+          <tbody id="detail"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card mt-6 rounded-2xl p-6">
+      <h2 class="text-sm font-semibold muted">Consommation par heure (Wh), en jaune la plage 9h–15h</h2>
+      <div id="chart" class="mt-4 flex h-56 items-end gap-1.5"></div>
+    </div>
+  </section>
+   </div>
+  </div>
+</main>
+
+<script>
+$(function () {
+  var HOURS = 24, n = 0, painting = null;
+  var DAY_START = 9, DAY_END = 15; // plage 9h–15h (colonnes incluses)
+  function inDay(h) { return h >= DAY_START && h <= DAY_END; }
+
+  // En-têtes des heures
+  for (var h = 0; h < HOURS; h++) {
+    $("#head").append('<th class="w-9 px-0.5 py-3 text-center text-[11px] font-medium muted' + (inDay(h) ? ' solar' : '') + '">' + h + 'h</th>');
+  }
+  $("#head").append('<th class="w-10"></th>');
+
+  function fmt(x, d) { return Number(x).toLocaleString("fr-FR", { maximumFractionDigits: d === undefined ? 0 : d }); }
+  function esc(s) { return $("<div>").text(s).html(); }
+
+  function updateCount() {
+    var c = $("#rows tr").length;
+    $("#count").text(c === 0 ? "Aucun appareil pour le moment" : c + (c > 1 ? " appareils" : " appareil"));
+    $("#empty").toggle(c === 0);
+  }
+
+  function addRow() {
+    n++;
+    var cells = "";
+    for (var h = 0; h < HOURS; h++) {
+      cells += '<td class="p-0.5' + (inDay(h) ? ' solar' : '') + '"><button type="button" class="cell block h-8 w-8 rounded-md" data-h="' + h + '" aria-pressed="false" aria-label="' + h + ' h"></button></td>';
+    }
+    var tr = $(
+      '<tr class="row border-t" style="border-color:#dde3ec">' +
+        '<td class="sticky-col sticky left-0 z-10 px-3 py-2"><input type="text" class="name input w-full rounded-lg px-3 py-2" placeholder="Ex : Réfrigérateur" aria-label="Nom de l’appareil"></td>' +
+        '<td class="px-3 py-2"><input type="number" min="0" step="1" class="power input w-28 rounded-lg px-3 py-2" placeholder="0" aria-label="Puissance en watts"></td>' +
+        cells +
+        '<td class="px-2 py-2"><button type="button" class="del rounded-lg px-2 py-1.5 text-lg leading-none muted hover:bg-red-100 hover:text-red-600" aria-label="Supprimer cet appareil" title="Supprimer">×</button></td>' +
+      '</tr>'
+    );
+    tr.data("n", n);
+    $("#rows").append(tr);
+    updateCount();
+    tr.find(".name").focus();
+  }
+
+  // Ligne vide
+  $("#grid").after('<p id="empty" class="muted hidden px-4 py-10 text-center text-sm">Cliquez sur « Ajouter un appareil » pour commencer.</p>');
+
+  $("#add").on("click", addRow);
+
+  $("#rows").on("click", ".del", function () {
+    $(this).closest("tr").remove();
+    updateCount();
+  });
+
+  // Interrupteurs horaires : clic + glisser
+  function setCell($c, on) { $c.toggleClass("on", on).attr("aria-pressed", on); }
+  $("#rows").on("mousedown", ".cell", function (e) {
+    e.preventDefault();
+    painting = !$(this).hasClass("on");
+    setCell($(this), painting);
+  });
+  $("#rows").on("mouseenter", ".cell", function () {
+    if (painting !== null) setCell($(this), painting);
+  });
+  $(document).on("mouseup", function () { painting = null; });
+  $("#rows").on("keydown", ".cell", function (e) {
+    if (e.key === " " || e.key === "Enter") { e.preventDefault(); setCell($(this), !$(this).hasClass("on")); }
+  });
+
+  // Calcul
+  $("#calc").on("click", function () {
+    var devices = [], hourly = new Array(HOURS).fill(0), totalWh = 0;
+
+    $("#rows tr").each(function (i) {
+      var $r = $(this);
+      var name = $.trim($r.find(".name").val()) || "Appareil " + (i + 1);
+      var p = parseInt($r.find(".power").val(), 10);
+      if (isNaN(p) || p < 0) p = 0;
+      var active = [];
+      $r.find(".cell.on").each(function () { active.push(parseInt($(this).data("h"), 10)); });
+      var wh = p * active.length;
+      active.forEach(function (h) { hourly[h] += p; });
+      totalWh += wh;
+      devices.push({ name: name, p: p, hrs: active.length, wh: wh });
+    });
+
+    if (devices.length === 0) { $("#empty").show(); return; }
+
+    $("#kwh").text(fmt(totalWh / 1000, 2));
+    $("#wh").text(fmt(totalWh));
+    $("#nb").text(devices.length);
+    var autoWh = 0;
+    for (var k = 0; k < HOURS; k++) { if (!inDay(k)) autoWh += hourly[k]; }
+    $("#auto-kwh").text(fmt(autoWh / 1000, 2));
+    $("#auto-wh").text(fmt(autoWh));
+
+    var maxH = Math.max.apply(null, hourly), peakIdx = hourly.indexOf(maxH);
+    $("#peak").text(maxH > 0 ? peakIdx + "h – " + (peakIdx + 1) + "h" : "–");
+    $("#peakw").text(fmt(maxH) + " W");
+
+    var $d = $("#detail").empty();
+    devices.forEach(function (d) {
+      var share = totalWh > 0 ? (d.wh / totalWh) * 100 : 0;
+      $d.append(
+        '<tr class="border-t" style="border-color:#dde3ec">' +
+          '<td class="py-2.5 pr-3 font-semibold">' + esc(d.name) + '</td>' +
+          '<td class="py-2.5 pr-3 text-right">' + fmt(d.p) + ' W</td>' +
+          '<td class="py-2.5 pr-3 text-right">' + d.hrs + ' h</td>' +
+          '<td class="py-2.5 pr-3 text-right">' + fmt(d.wh) + '</td>' +
+          '<td class="py-2.5 pr-3 text-right font-semibold">' + fmt(d.wh / 1000, 2) + '</td>' +
+          '<td class="py-2.5"><div class="flex items-center gap-2"><div class="share h-2 flex-1 overflow-hidden rounded-full"><div class="bar h-full rounded-full" style="width:' + share.toFixed(1) + '%"></div></div><span class="w-10 text-right text-xs muted">' + fmt(share) + ' %</span></div></td>' +
+        '</tr>'
+      );
+    });
+
+    var $c = $("#chart").empty();
+    for (var h = 0; h < HOURS; h++) {
+      var pct = maxH > 0 ? (hourly[h] / maxH) * 100 : 0;
+      $c.append(
+        '<div class="flex h-full flex-1 flex-col items-center justify-end gap-1" title="' + h + 'h : ' + fmt(hourly[h]) + ' Wh">' +
+          '<span class="text-[10px] muted">' + (hourly[h] > 0 ? fmt(hourly[h]) : "") + '</span>' +
+          '<div class="bar w-full rounded-t-md" style="' + (inDay(h) ? 'background:#eab308;' : '') + 'height:' + (hourly[h] > 0 ? Math.max(pct * 0.78, 2) : 0) + '%"></div>' +
+          '<span class="text-[11px] muted">' + h + '</span>' +
+        '</div>'
+      );
+    }
+
+    $("#stamp").text("Simulation du " + new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }));
+    openModal();
+  });
+
+  // Fenêtre modale
+  function openModal() { $("#modal").removeClass("hidden").addClass("flex").scrollTop(0); $("body").css("overflow", "hidden"); $("#close").focus(); }
+  function closeModal() { $("#modal").addClass("hidden").removeClass("flex"); $("body").css("overflow", ""); }
+  function toast(msg) { $("#toast").text(msg).removeClass("hidden"); setTimeout(function () { $("#toast").addClass("hidden"); }, 4000); }
+  $("#close").on("click", closeModal);
+  $("#modal").on("mousedown", function (e) { if (e.target === this) closeModal(); });
+  $(document).on("keydown", function (e) { if (e.key === "Escape") closeModal(); });
+
+  // Export PDF
+  var downloads = null;
+  if (window.claude && window.claude.use) {
+    window.claude.use("downloads").then(function (d) { downloads = d; }).catch(function () {});
+  }
+  $("#pdf").on("click", async function () {
+    var $b = $(this), label = $b.text();
+    if (!downloads) { toast("L’export PDF n’est pas disponible dans cet affichage."); return; }
+    $b.prop("disabled", true).text("Export en cours…");
+    try {
+      var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var canvas = await html2canvas(document.getElementById("report"), {
+        scale: 2, useCORS: true, scrollX: 0, scrollY: 0, backgroundColor: dark ? "#141c2e" : "#ffffff",
+        onclone: function (doc) {
+          var m = doc.getElementById("modal");
+          m.style.position = "static"; m.style.overflow = "visible"; m.style.height = "auto"; m.style.padding = "0"; m.style.background = "transparent";
+          doc.getElementById("report").style.margin = "0";
+        }
+      });
+      var w = canvas.width / 2, h = canvas.height / 2;
+      var pdf = new window.jspdf.jsPDF({ orientation: w > h ? "l" : "p", unit: "px", format: [w, h], hotfixes: ["px_scaling"] });
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+      await downloads.save({ filename: "consommation-journaliere.pdf", data: pdf.output("blob") });
+    } catch (err) {
+      if (!err || err.code !== "declined") toast("L’export PDF a échoué. Réessayez.");
+    } finally {
+      $b.prop("disabled", false).text(label);
+    }
+  });
+
+  addRow();
+  $("#rows .name").blur();
+});
+</script>
+</body>
+</html>
